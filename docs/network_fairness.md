@@ -4,12 +4,12 @@
 
 Reviewed local, unmodified upstream source (no benchmark reruns or upstream changes):
 
-- [epoll server](../network/traditional/vendor/epoll_echo_server.c), commit `22f325165c3e9749aca85a777cbb8f9b66ea7a27`.
-- [io_uring server](../network/io_uring/vendor/io_uring_echo_server.c), commit `dc00940baeec2ac577410dfa4d881d0852b01a08`.
-- [Rust client](../network/client/vendor/src/main.rs), commit `920f8a5a2ab4d99ebb71bdc1b9fe9e62e303ecdf`.
+- [epoll server](https://github.com/frevib/epoll-echo-server/blob/22f325165c3e9749aca85a777cbb8f9b66ea7a27/epoll_echo_server.c), commit `22f325165c3e9749aca85a777cbb8f9b66ea7a27`.
+- [io_uring server](https://github.com/frevib/io_uring-echo-server/blob/dc00940baeec2ac577410dfa4d881d0852b01a08/io_uring_echo_server.c), commit `dc00940baeec2ac577410dfa4d881d0852b01a08`.
+- [Rust client](https://github.com/haraldh/rust_echo_bench/blob/920f8a5a2ab4d99ebb71bdc1b9fe9e62e303ecdf/src/main.rs), commit `920f8a5a2ab4d99ebb71bdc1b9fe9e62e303ecdf`.
 - [Runner](../network/scripts/run_network.sh), upstream Makefiles, existing metadata, CSVs and client/server logs.
 
-These local vendor links work after fetching the recorded sources; vendor directories are ignored by Git. Source differences below are verified; their performance effects are hypotheses, not measured syscall or CPU profiles. Both C Makefiles default to `-Wall -O2 -D_GNU_SOURCE`; the Rust build script requests release mode. Existing metadata does not prove exact binary build flags or source-to-binary identity.
+The links above reference immutable upstream commits. Local vendor directories are ignored by Git. Source differences below are verified; their performance effects are hypotheses, not measured syscall or CPU profiles. Both C Makefiles default to `-Wall -O2 -D_GNU_SOURCE`; the Rust build script requests release mode. Existing metadata does not prove exact binary build flags or source-to-binary identity.
 
 ## Verified server differences
 
