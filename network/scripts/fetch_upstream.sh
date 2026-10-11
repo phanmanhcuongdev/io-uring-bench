@@ -19,9 +19,6 @@ clone_one() {
     local expected_url
 
     case "$rel" in
-        network/traditional/vendor)
-            expected_url="https://github.com/frevib/epoll-echo-server.git"
-            ;;
         network/io_uring/vendor)
             expected_url="https://github.com/frevib/io_uring-echo-server.git"
             ;;
@@ -54,8 +51,13 @@ clone_one() {
 
         if ! git -C "$dest" diff --quiet ||
            ! git -C "$dest" diff --cached --quiet; then
-            echo "ERROR: Local source modifications detected: $rel" >&2
-            exit 1
+            component="$(basename "$(dirname "$rel")")"
+            patch="$ROOT/network/patches/$component.patch"
+            actual="$(git -C "$dest" diff --binary)"
+            expected="$(cat "$patch")"
+            [[ "$actual" == "$expected" ]] && git -C "$dest" diff --cached --quiet || {
+                echo "ERROR: Unrecognized local modifications: $rel" >&2; exit 1;
+            }
         fi
 
     elif [[ -e "$dest" ]] && [[ -n "$(ls -A "$dest" 2>/dev/null)" ]]; then
@@ -98,8 +100,8 @@ while IFS=$'\t' read -r rel url sha; do
     ((count += 1))
 done < "$MANIFEST"
 
-[[ "$count" -eq 3 ]] || {
-    echo "ERROR: Expected 3 upstream entries, found $count" >&2
+[[ "$count" -eq 2 ]] || {
+    echo "ERROR: Expected 2 upstream entries, found $count" >&2
     exit 1
 }
 

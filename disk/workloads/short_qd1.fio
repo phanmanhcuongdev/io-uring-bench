@@ -1,13 +1,14 @@
 [global]
 # Small direct reads, QD=1: see submission/completion overhead when I/O is short.
 rw=randread
+# Uniform sampling with replacement on both architectures.
+norandommap=1
+randrepeat=1
 bs=4k
 size=1g
-numjobs=1
-iodepth=1
 direct=1
 invalidate=1
-group_reporting=1
+group_reporting=0
 thread=1
 time_based=1
 # Runtime and ramp are supplied by disk/scripts/run_disk.sh.

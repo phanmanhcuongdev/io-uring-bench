@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-[[ -f "$ROOT/network/traditional/vendor/Makefile" ]] || { echo 'Run bash network/scripts/fetch_upstream.sh first' >&2; exit 1; }
-[[ -f "$ROOT/network/io_uring/vendor/Makefile" ]] || { echo 'Missing io_uring source' >&2; exit 1; }
-[[ -f "$ROOT/network/client/vendor/Cargo.toml" ]] || { echo 'Missing Rust echo bench source' >&2; exit 1; }
-make -C "$ROOT/network/traditional/vendor"
+# Keep fixes reviewable and reproducible without vendoring whole upstream trees.
+for component in io_uring client; do
+  dest="$ROOT/network/$component/vendor"
+  patch="$ROOT/network/patches/$component.patch"
+  [[ -d "$dest/.git" ]] || { echo 'Run network/scripts/fetch_upstream.sh first' >&2; exit 1; }
+  expected="$(awk -F '\t' -v rel="network/$component/vendor" '$1==rel {print $3}' "$ROOT/docs/upstream-versions.tsv")"
+  [[ "$(git -C "$dest" rev-parse HEAD)" == "$expected" ]] || { echo "Wrong upstream revision: $component" >&2; exit 1; }
+  if git -C "$dest" apply --reverse --check "$patch" 2>/dev/null; then :
+  else git -C "$dest" apply --check "$patch"; git -C "$dest" apply "$patch"; fi
+  [[ "$(git -C "$dest" diff --binary)" == "$(cat "$patch")" ]] && git -C "$dest" diff --cached --quiet || {
+    echo "Unrecognized source modifications: $component" >&2; exit 1;
+  }
+done
+make -C "$ROOT/network/traditional"
 make -C "$ROOT/network/io_uring/vendor" io_uring_echo_server
-cargo build --manifest-path "$ROOT/network/client/vendor/Cargo.toml" --release
-printf '\nExecutables:\n  %s\n' \
- "$ROOT/network/traditional/vendor/epoll_echo_server" \
- "$ROOT/network/io_uring/vendor/io_uring_echo_server" \
- "$ROOT/network/client/vendor/target/release/echo_bench"
+cp "$ROOT/network/client/Cargo.lock" "$ROOT/network/client/vendor/Cargo.lock"
+cargo build --locked --manifest-path "$ROOT/network/client/vendor/Cargo.toml" --release

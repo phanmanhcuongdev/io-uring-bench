@@ -1,47 +1,9 @@
-# Third-party components & provenance
+# Third-party source and reproducibility
 
-This project reuses existing open-source components.
+Current dependencies: fio, liburing, and two MIT-licensed pinned upstream repositories listed in upstream-versions.tsv: frevib/io_uring-echo-server and haraldh/rust_echo_bench. The blocking Traditional server is maintained here; there is no epoll runtime/build dependency.
 
-## Dependencies
+fetch_upstream.sh clones and verifies pinned commits, refusing unrecognized tracked modifications. build.sh applies network/patches/io_uring.patch and client.patch idempotently before building. network/client/Cargo.lock pins Rust dependencies; build uses --locked. Patches are part of the methodology; rerun both methods if they change. Keep upstream licenses with downloaded source. Vendor source and build products are ignored; tracked patches make clean checkouts reproducible. Metadata includes binary hashes and upstream Git status.
 
-- [fio](https://github.com/axboe/fio) — Disk I/O benchmarking tool, installed through the system package manager.
-- [liburing](https://github.com/axboe/liburing) — Userspace interface for Linux io_uring, installed through the system package manager.
-- [frevib/epoll-echo-server](https://github.com/frevib/epoll-echo-server) — MIT-licensed C echo server.
-- [frevib/io_uring-echo-server](https://github.com/frevib/io_uring-echo-server) — MIT-licensed C echo server.
-- [haraldh/rust_echo_bench](https://github.com/haraldh/rust_echo_bench) — MIT-licensed Rust benchmark client.
+For an upstream upgrade, review source, update manifest, regenerate/review patches and remeasure. Do not silently change revisions. Historical epoll provenance remains in legacy_results.md and legacy_network_audit.md solely to identify archived results. No historical raw data is deleted by these scripts.
 
-## Reproducibility
-
-The file `docs/upstream-versions.tsv` is the source of truth for pinned upstream versions.
-
-Run:
-
-```bash
-bash network/scripts/fetch_upstream.sh
-```
-
-The fetch script:
-
-1. Clones missing upstream repositories into their respective `vendor/` directories.
-2. Checks out the exact commit SHA recorded in the manifest.
-3. Verifies existing repositories against the recorded commit.
-4. Refuses to overwrite modified tracked source files.
-5. Does not silently update upstream dependencies or rewrite the manifest.
-
-To intentionally upgrade an upstream dependency, review the changes, update its commit SHA in the manifest, rebuild and rerun the relevant benchmarks.
-
-## Licensing
-
-The three network upstream repositories are MIT-licensed at the recorded revisions.
-
-Their source code, Git metadata and original license files remain within local `vendor/` directories, which are excluded from this repository.
-
-If upstream source is distributed directly in the future, retain the corresponding copyright and license notices.
-
-The scripts, fio workload definitions, analysis utilities and documentation maintained in this repository are separate from those upstream projects.
-
-## Limitations
-
-Pinning source revisions improves reproducibility but does not guarantee identical measurements across machines.
-
-Results also depend on the kernel, compiler, runtime libraries, CPU, storage hardware, filesystem and operating environment.
+The project has no license for its original glue code; public availability does not automatically grant reuse permission.

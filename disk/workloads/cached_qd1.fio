@@ -3,11 +3,9 @@
 rw=read
 bs=4k
 size=256m
-numjobs=1
-iodepth=1
 direct=0
 invalidate=0
-group_reporting=1
+group_reporting=0
 thread=1
 time_based=1
 # Runtime and ramp are supplied by disk/scripts/run_disk.sh.

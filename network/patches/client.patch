@@ -1,0 +1,209 @@
+diff --git a/src/main.rs b/src/main.rs
+index 56c4a3a..07540ca 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1,10 +1,9 @@
+ use std::env;
+ use std::io::{Read, Write};
+ use std::net::TcpStream;
+-use std::sync::atomic::{AtomicBool, Ordering};
+-use std::sync::{mpsc, Arc};
++use std::sync::{mpsc, Arc, Barrier, Mutex};
+ use std::thread;
+-use std::time::Duration;
++use std::time::{Duration, Instant};
+ 
+ fn print_usage(program: &str, opts: &getopts::Options) {
+     let brief = format!(
+@@ -13,7 +12,7 @@ fn print_usage(program: &str, opts: &getopts::Options) {
+ Usage:
+   {program} [ -a <address> ] [ -l <length> ] [ -c <number> ] [ -t <duration> ]
+   {program} (-h | --help)
+-  {program} --version"#,
++"#,
+         program = program
+     );
+     print!("{}", opts.usage(&brief));
+@@ -22,6 +21,7 @@ Usage:
+ struct Count {
+     inb: u64,
+     outb: u64,
++    failed: bool,
+ }
+ 
+ fn main() {
+@@ -60,7 +60,7 @@ fn main() {
+         Err(f) => {
+             eprintln!("{}", f.to_string());
+             print_usage(&program, &opts);
+-            return;
++            std::process::exit(1);
+         }
+     };
+ 
+@@ -71,97 +71,99 @@ fn main() {
+ 
+     let length = matches
+         .opt_str("length")
+-        .unwrap_or_default()
++        .unwrap_or_else(|| "512".to_string())
+         .parse::<usize>()
+-        .unwrap_or(512);
++        .expect("invalid numeric argument");
+     let duration = matches
+         .opt_str("duration")
+-        .unwrap_or_default()
++        .unwrap_or_else(|| "60".to_string())
+         .parse::<u64>()
+-        .unwrap_or(60);
++        .expect("invalid numeric argument");
+     let number = matches
+         .opt_str("number")
+-        .unwrap_or_default()
++        .unwrap_or_else(|| "50".to_string())
+         .parse::<u32>()
+-        .unwrap_or(50);
++        .expect("invalid numeric argument");
+     let address = matches
+         .opt_str("address")
+         .unwrap_or_else(|| "127.0.0.1:12345".to_string());
+ 
++    assert!(length > 0 && duration > 0 && number > 0);
++    let address: std::net::SocketAddr = address.parse().expect("numeric socket address required");
+     let (tx, rx) = mpsc::channel();
+-
+-    let stop = Arc::new(AtomicBool::new(false));
+-    let control = Arc::downgrade(&stop);
+-
++    let (ready_tx, ready_rx) = mpsc::channel();
++    let gate = Arc::new(Barrier::new(number as usize + 1));
++    let window = Arc::new(Mutex::new(None::<(Instant, Instant)>));
+     for _ in 0..number {
+         let tx = tx.clone();
+-        let address = address.clone();
+-        let stop = stop.clone();
+-        let length = length;
+-
+-        thread::spawn(move || {
+-            let mut sum = Count { inb: 0, outb: 0 };
+-            let mut out_buf: Vec<u8> = vec![0; length];
++        let ready_tx = ready_tx.clone();
++        let gate = gate.clone();
++        let window = window.clone();
++        thread::Builder::new().spawn(move || {
++            let mut out_buf = vec![0; length];
+             out_buf[length - 1] = b'\n';
+-            let mut in_buf: Vec<u8> = vec![0; length];
+-            let mut stream = TcpStream::connect(&*address).unwrap();
+-
+-            loop {
+-                if (*stop).load(Ordering::Relaxed) {
+-                    break;
++            let mut in_buf = vec![0; length];
++            // A verified handshake excludes connect/accept/thread startup from timing.
++            let setup = (|| -> std::io::Result<TcpStream> {
++                let mut stream = TcpStream::connect_timeout(&address, Duration::from_secs(5))?;
++                stream.set_nodelay(false)?;
++                stream.set_read_timeout(Some(Duration::from_secs(5)))?;
++                stream.set_write_timeout(Some(Duration::from_secs(5)))?;
++                stream.write_all(&out_buf)?;
++                stream.read_exact(&mut in_buf)?;
++                if in_buf != out_buf { return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "handshake payload mismatch")); }
++                Ok(stream)
++            })();
++            let mut stream = match setup {
++                Ok(stream) => { ready_tx.send(Ok(())).unwrap(); stream },
++                Err(e) => { let _ = ready_tx.send(Err(e.to_string())); return; }
++            };
++            gate.wait();
++            let (_, deadline) = window.lock().unwrap().unwrap();
++            let mut sum = Count { inb: 0, outb: 0, failed: false };
++            while Instant::now() < deadline {
++                if let Err(e) = stream.write_all(&out_buf) {
++                    eprintln!("write: {}", e); sum.failed = true; break;
+                 }
+-
+-                match stream.write_all(&out_buf) {
+-                    Err(_) => {
+-                        println!("Write error!");
+-                        break;
+-                    }
+-                    Ok(_) => sum.outb += 1,
++                if Instant::now() < deadline { sum.outb += 1; }
++                if let Err(e) = stream.read_exact(&mut in_buf) {
++                    eprintln!("read: {}", e); sum.failed = true; break;
+                 }
+-
+-                if (*stop).load(Ordering::Relaxed) {
+-                    break;
++                if in_buf != out_buf {
++                    eprintln!("payload mismatch"); sum.failed = true; break;
+                 }
+-
+-                match stream.read(&mut in_buf) {
+-                    Err(_) => break,
+-                    Ok(m) => {
+-                        if m == 0 || m != length {
+-                            println!("Read error! length={}", m);
+-                            break;
+-                        }
+-                    }
+-                };
+-                sum.inb += 1;
++                // Draining a response after the deadline must not inflate RPS.
++                if Instant::now() < deadline { sum.inb += 1; }
+             }
++            if sum.inb == 0 { eprintln!("worker completed zero responses"); sum.failed = true; }
+             tx.send(sum).unwrap();
+-        });
++        }).expect("failed to spawn client worker");
+     }
+-
+-    thread::sleep(Duration::from_secs(duration));
+-
+-    match control.upgrade() {
+-        Some(stop) => (*stop).store(true, Ordering::Relaxed),
+-        None => println!("Sorry, but all threads died already."),
++    drop(tx);
++    drop(ready_tx);
++    for _ in 0..number {
++        match ready_rx.recv_timeout(Duration::from_secs(10)) {
++            Ok(Ok(())) => (),
++            other => { eprintln!("worker setup failed: {:?}", other); std::process::exit(1); }
++        }
+     }
+-
+-    let mut sum = Count { inb: 0, outb: 0 };
++    let start = Instant::now();
++    let deadline = start + Duration::from_secs(duration);
++    *window.lock().unwrap() = Some((start, deadline));
++    gate.wait();
++    let mut sum = Count { inb: 0, outb: 0, failed: false };
+     for _ in 0..number {
+-        let c: Count = rx.recv().unwrap();
+-        sum.inb += c.inb;
+-        sum.outb += c.outb;
++        let c = rx.recv().expect("worker died before reporting");
++        sum.inb += c.inb; sum.outb += c.outb; sum.failed |= c.failed;
+     }
++    if sum.failed { std::process::exit(1); }
++    let seconds = deadline.duration_since(start).as_secs_f64();
+     println!("Benchmarking: {}", address);
+-    println!(
+-        "{} clients, running {} bytes, {} sec.",
+-        number, length, duration
+-    );
+-    println!();
+-    println!(
+-        "Speed: {} request/sec, {} response/sec",
+-        sum.outb / duration,
+-        sum.inb / duration
+-    );
++    println!("{} clients, running {} bytes, {} sec.", number, length, duration);
++    println!("Active connections: {}", number);
++    println!("Measurement seconds: {:.6}", seconds);
++    println!("Collection seconds: {:.6}", start.elapsed().as_secs_f64());
++    println!("Speed: {:.6} request/sec, {:.6} response/sec", sum.outb as f64 / seconds, sum.inb as f64 / seconds);
+     println!("Requests: {}", sum.outb);
+     println!("Responses: {}", sum.inb);
+ }

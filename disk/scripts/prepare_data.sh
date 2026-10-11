@@ -16,4 +16,4 @@ avail=$(df -Pk "$(dirname "$FILE")" | awk 'NR==2 {print $4}')
 if (( avail < (SIZE_MB+512)*1024 )); then echo 'Not enough free disk space (need file + 512 MiB headroom)' >&2; exit 1; fi
 # Real file data, not just sparse extents; slow on some drives.
 echo "Creating $SIZE_MB MiB test file: $FILE"
-dd if=/dev/urandom of="$FILE" bs=1M count="$SIZE_MB" oflag=excl conv=fsync status=progress
+dd if=/dev/urandom of="$FILE" bs=1M count="$SIZE_MB" conv=excl,fsync status=progress
