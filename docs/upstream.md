@@ -1,13 +1,47 @@
 # Third-party components & provenance
 
-- `fio`: https://github.com/axboe/fio — benchmark tool, installed via distro package manager. The distro carries its corresponding license.
-- `liburing`: https://github.com/axboe/liburing — userspace library provided by distro, subject to upstream licensing.
-- `frevib/epoll-echo-server`: https://github.com/frevib/epoll-echo-server — MIT-licensed C echo server.
-- `frevib/io_uring-echo-server`: https://github.com/frevib/io_uring-echo-server — MIT-licensed C echo server; requires certain io_uring kernel capabilities.
-- `haraldh/rust_echo_bench`: https://github.com/haraldh/rust_echo_bench — MIT-licensed Rust benchmark client.
+This project reuses existing open-source components.
 
-`network/scripts/fetch_upstream.sh` clones each repository into a local ignored `vendor/` folder and writes the exact commit hashes to `docs/upstream-versions.tsv`. When reproducing a run, reuse the recorded commits (e.g. `git -C network/.../vendor checkout <hash>` after fetching full history if necessary).
+## Dependencies
 
-Do not present upstream code as originally authored here. If you eventually vendor source into this repository, include the complete license texts and attribution.
+- [fio](https://github.com/axboe/fio) — Disk I/O benchmarking tool, installed through the system package manager.
+- [liburing](https://github.com/axboe/liburing) — Userspace interface for Linux io_uring, installed through the system package manager.
+- [frevib/epoll-echo-server](https://github.com/frevib/epoll-echo-server) — MIT-licensed C echo server.
+- [frevib/io_uring-echo-server](https://github.com/frevib/io_uring-echo-server) — MIT-licensed C echo server.
+- [haraldh/rust_echo_bench](https://github.com/haraldh/rust_echo_bench) — MIT-licensed Rust benchmark client.
 
-The local LICENSE files for all three fetched repositories were checked and contain the MIT license at the commits recorded in `upstream-versions.tsv`. Recheck the license if these commits change. Local upstream checkouts and their licenses are preserved but excluded from the first commit; they are independent nested Git repositories, not submodules. Python analysis uses only the standard library.
+## Reproducibility
+
+The file `docs/upstream-versions.tsv` is the source of truth for pinned upstream versions.
+
+Run:
+
+```bash
+bash network/scripts/fetch_upstream.sh
+```
+
+The fetch script:
+
+1. Clones missing upstream repositories into their respective `vendor/` directories.
+2. Checks out the exact commit SHA recorded in the manifest.
+3. Verifies existing repositories against the recorded commit.
+4. Refuses to overwrite modified tracked source files.
+5. Does not silently update upstream dependencies or rewrite the manifest.
+
+To intentionally upgrade an upstream dependency, review the changes, update its commit SHA in the manifest, rebuild and rerun the relevant benchmarks.
+
+## Licensing
+
+The three network upstream repositories are MIT-licensed at the recorded revisions.
+
+Their source code, Git metadata and original license files remain within local `vendor/` directories, which are excluded from this repository.
+
+If upstream source is distributed directly in the future, retain the corresponding copyright and license notices.
+
+The scripts, fio workload definitions, analysis utilities and documentation maintained in this repository are separate from those upstream projects.
+
+## Limitations
+
+Pinning source revisions improves reproducibility but does not guarantee identical measurements across machines.
+
+Results also depend on the kernel, compiler, runtime libraries, CPU, storage hardware, filesystem and operating environment.

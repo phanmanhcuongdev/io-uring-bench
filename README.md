@@ -1,72 +1,298 @@
 # Linux io_uring Benchmarks — Disk + Network
 
-A reproducible **learning & benchmarking harness** comparing conventional Linux I/O interfaces with io_uring. It **reuses upstream engines** rather than rewriting them:
+A reproducible learning and benchmarking project comparing conventional Linux I/O interfaces with **io_uring**.
 
-- **Disk**: [fio](https://github.com/axboe/fio) `psync`, `libaio`, `io_uring` engines.
-- **Network**: [frevib/epoll-echo-server](https://github.com/frevib/epoll-echo-server), [frevib/io_uring-echo-server](https://github.com/frevib/io_uring-echo-server), [haraldh/rust_echo_bench](https://github.com/haraldh/rust_echo_bench).
-- **Analysis**: Python standard library/SVG, with raw output retained alongside metadata.
+The project reuses established open-source tools rather than rewriting the benchmark engines.
 
-## Quick start (Debian 13)
+## Overview
 
-Run commands from the repository root (`io-uring-bench/`). Runtime data, result, chart and vendor directories are created automatically; no placeholder files are required.
+Two categories of I/O are examined:
+
+- **Disk I/O:** synchronous and asynchronous file operations using fio.
+- **Network I/O:** TCP echo servers implemented with epoll and io_uring.
+
+Each workload is executed repeatedly. Raw measurements are collected and analyzed to produce summary CSV files and SVG charts.
+
+The objective is to investigate when io_uring performs better or worse under specific workloads, not to claim universal superiority.
+
+## Technologies
+
+| Component | Technology |
+|---|---|
+| Disk benchmark | fio |
+| Traditional synchronous I/O | psync |
+| Traditional asynchronous I/O | libaio |
+| Modern asynchronous I/O | io_uring |
+| Network baseline | epoll echo server |
+| Network comparison | io_uring echo server |
+| Network client | Rust echo benchmark |
+| Automation | Bash |
+| Analysis | Python standard library |
+| Visualization | SVG |
+
+## Project structure
+
+```text
+io-uring-bench/
+├── disk/
+│   ├── scripts/
+│   │   ├── prepare_data.sh
+│   │   └── run_disk.sh
+│   └── workloads/
+│       ├── cached_qd1.fio
+│       ├── short_qd1.fio
+│       ├── random_direct_qd32.fio
+│       └── sequential_direct_qd32.fio
+├── network/
+│   └── scripts/
+│       ├── fetch_upstream.sh
+│       ├── build.sh
+│       └── run_network.sh
+├── scripts/
+│   ├── setup.sh
+│   ├── analyze_disk.py
+│   ├── analyze_network.py
+│   └── svg_plot.py
+├── docs/
+│   ├── benchmark_method.md
+│   ├── network_fairness.md
+│   ├── upstream.md
+│   └── upstream-versions.tsv
+├── requirements.txt
+├── .gitignore
+└── README.md
+```
+
+Generated runtime directories are created automatically.
+
+## Quick start
+
+The benchmark suite is intended for Linux.
+
+The original measurements were performed on Debian 13.
+
+### 1. Install dependencies
 
 ```bash
 bash scripts/setup.sh
-bash disk/scripts/prepare_data.sh
-REPEATS=1 RUNTIME=2 RAMP=0 DEVICE=sata bash disk/scripts/run_disk.sh  # smoke test
-REPEATS=10 RUNTIME=8 RAMP=2 DEVICE=sata bash disk/scripts/run_disk.sh
-.venv/bin/python scripts/analyze_disk.py --root results --out charts
 ```
 
-`DEVICE` is only an output **label**, not a storage device selector. The test file must physically reside on the desired filesystem. `DATA_FILE=/your/safe/path/disk_test.bin` may be used with both scripts. The preparation script writes a **regular file**, never a raw block device. It creates 1 GiB of random data by default; it never overwrites an existing smaller file.
+The setup script installs tools including:
 
-Run the same commands on SATA and NVMe Linux hosts with `DEVICE=sata` or `DEVICE=nvme`. Copy their generated `results/<device>/...` directories to one machine, then run `analyze_disk.py`. Do not compare the raw absolute numbers as if differences come solely from interface type when CPU/kernel/filesystem differ.
+- fio
+- liburing development headers
+- GCC and Make
+- Rust and Cargo
+- Python 3
 
-**Disk comparisons**:
+It also creates a local Python virtual environment.
 
-| Workload | Engines | Queue Depth | Purpose |
-|---|---|---:|---|
-| `cached_qd1` | psync vs io_uring | 1 | Buffered read overhead; cache prewarmed |
-| `short_qd1` | psync vs io_uring | 1 | Small random direct read overhead |
-| `random_direct_qd32` | libaio vs io_uring | 32 | Random I/O concurrency |
-| `sequential_direct_qd32` | libaio vs io_uring | 32 | Direct sequential throughput |
+### 2. Disk benchmark
 
-`psync` is synchronous and does not produce genuine asynchronous QD32. Therefore high-QD workloads compare `libaio` against `io_uring` **at the same QD**. This measures their relative behavior, not a universal comparison against *all* traditional I/O APIs. Win/loss cases are **hypotheses**, not guaranteed outputs.
+Prepare a regular 1 GiB test file:
 
-Tests use read-only fio jobs, same regular input file, 10 repeats by default, alternating engine order within repeats, and collect raw fio JSON. `O_DIRECT` tests use aligned block sizes. `ramp_time` is excluded from fio's measured interval. The cached test explicitly prewarms its 256 MiB working set before each engine, but background pressure may still evict them.
+```bash
+bash disk/scripts/prepare_data.sh
+```
 
-## Network echo benchmark
+Smoke test:
+
+```bash
+REPEATS=1 RUNTIME=2 RAMP=0 DEVICE=sata \
+bash disk/scripts/run_disk.sh
+```
+
+Full benchmark:
+
+```bash
+REPEATS=10 RUNTIME=8 RAMP=2 DEVICE=sata \
+bash disk/scripts/run_disk.sh
+```
+
+Analyze results:
+
+```bash
+.venv/bin/python scripts/analyze_disk.py \
+  --root results --out charts
+```
+
+The `DEVICE` variable is an output label, not a physical device selector.
+
+To test another filesystem, set `DATA_FILE` to a regular file path located on the intended storage device.
+
+The scripts do not benchmark raw block devices.
+
+### Disk workloads
+
+| Workload | Baseline | Comparison | QD | Description |
+|---|---|---|---:|---|
+| cached_qd1 | psync | io_uring | 1 | Buffered 4 KiB reads |
+| short_qd1 | psync | io_uring | 1 | Random direct 4 KiB reads |
+| random_direct_qd32 | libaio | io_uring | 32 | Random direct 4 KiB reads |
+| sequential_direct_qd32 | libaio | io_uring | 32 | Sequential direct 128 KiB reads |
+
+The high-queue-depth experiments compare libaio against io_uring because psync is a synchronous fio engine and cannot represent 32 outstanding asynchronous I/O operations.
+
+The test uses a regular input file, read-only workloads and alternating engine order.
+
+### 3. Network benchmark
+
+Fetch the exact upstream source revisions:
 
 ```bash
 bash network/scripts/fetch_upstream.sh
-bash network/scripts/build.sh
-REPEATS=1 DURATION=3 DEVICE=sata bash network/scripts/run_network.sh    # smoke test
-REPEATS=10 DURATION=8 DEVICE=sata bash network/scripts/run_network.sh
-.venv/bin/python scripts/analyze_network.py --root results --out charts
 ```
 
-This local runner starts an upstream **epoll** or **io_uring** echo server on port `18888`, then runs the same Rust client against `127.0.0.1:18888`. The server bind address is controlled by upstream code; loopback client traffic does not guarantee a loopback-only listener. It tests 1, 100, and 1000 connections (may be limited by RAM/file descriptor limits). Results are **loopback networking**, not NIC throughput. Do not use these untrusted upstream servers on public interfaces; review their code before exposing ports. Ports must be free. `PORT=...` changes listening port. Setup installs Rust/Cargo. The Rust client uses crates from its own repository, downloaded at build time. This integration is subject to upstream build/runtime compatibility. See [the network fairness audit](docs/network_fairness.md) for verified implementation differences. Network charts include only matched experiments with at least 10 runs per engine for 1, 100 and 1000 connections; CSV summaries retain smoke tests.
+Build the echo servers and Rust client:
 
-## Output
+```bash
+bash network/scripts/build.sh
+```
 
-- Raw fio JSON: `results/<device>/<host>-<timestamp>/disk/`
-- Network logs + `runs.csv`: `results/<device>/<host>-<timestamp>/network/`
-- Graphs + summary CSVs: `charts/` (generated)
-- Upstream git commit manifest: `docs/upstream-versions.tsv` (recorded provenance; include it in Git)
+Smoke test:
 
-`data/`, `results/`, `charts/`, `.venv/` and fetched `network/*/vendor/` checkouts (including their nested Git metadata and binaries) are ignored. Keep the vendor directories locally; fetch/build them on a fresh checkout. `results/` and `charts/` data are not committed by default. Preserve representative outputs for your slides or attach them to a release.
+```bash
+DEVICE=loopback CONNECTIONS=1 REPEATS=1 DURATION=3 MSG_BYTES=64 \
+bash network/scripts/run_network.sh
+```
+
+Full benchmark:
+
+```bash
+DEVICE=loopback CONNECTIONS="1 100 1000" REPEATS=10 DURATION=5 MSG_BYTES=64 \
+bash network/scripts/run_network.sh
+```
+
+Analyze results:
+
+```bash
+.venv/bin/python scripts/analyze_network.py \
+  --root results --out charts
+```
+
+The local runner starts one server at a time and uses the same Rust client against `127.0.0.1:18888`.
+
+The workload uses TCP loopback. It does not measure physical network interface throughput.
+
+Note that the upstream servers bind to the wildcard IPv4 address rather than strictly to loopback. Run the experiment only in an appropriate trusted environment.
+
+The two server implementations also have meaningful internal differences. See [Network Fairness Audit](docs/network_fairness.md).
+
+## Experimental results
+
+The following are measurements collected on an older HP Compaq laptop running Debian 13 with Linux kernel `6.12.111+deb13-amd64`.
+
+These values are specific to the tested machine, workloads and software implementations.
+
+### Disk results — SATA SSD
+
+Median throughput from 10 repetitions per engine/workload.
+
+| Workload | Baseline MiB/s | io_uring MiB/s | Difference |
+|---|---:|---:|---:|
+| cached_qd1 | 337.912 | 300.435 | -11.09% |
+| short_qd1 | 20.849 | 21.025 | +0.85% |
+| random_direct_qd32 | 110.616 | 114.396 | +3.42% |
+| sequential_direct_qd32 | 256.830 | 257.087 | +0.10% |
+
+The cached workload favors psync, whereas io_uring performs slightly better in the tested direct I/O workloads.
+
+Small differences should not be interpreted as universal performance advantages.
+
+### Network results — TCP loopback
+
+Median completed responses per second from 10 repetitions per server/concurrency level.
+
+Configuration: 64-byte messages, 5 seconds per run.
+
+| Connections | epoll responses/s | io_uring responses/s | Difference |
+|---|---:|---:|---:|
+| 1 | 24089 | 22391 | -7.05% |
+| 100 | 20603 | 20224.5 | -1.84% |
+| 1000 | 20572.5 | 19872.5 | -3.40% |
+
+For these specific implementations, epoll achieved higher median throughput at all three tested concurrency levels.
+
+This experiment does not isolate epoll versus io_uring kernel-interface overhead.
+
+See [Network Fairness Audit](docs/network_fairness.md) for implementation differences, client limitations and threats to validity.
+
+## Generated outputs
+
+Disk:
+
+```text
+results/<device>/<host-run>/disk/
+```
+
+Network:
+
+```text
+results/<device>/<host-run>/network/
+```
+
+Analysis:
+
+```text
+charts/
+├── disk_runs.csv
+├── disk_medians.csv
+├── disk_speedups.csv
+├── disk_throughput.svg
+├── disk_clatency.svg
+├── disk_speedup.svg
+├── network_medians.csv
+└── network_speedup.svg
+```
+
+Raw benchmark data and generated charts are ignored by Git to avoid committing unnecessary artifacts.
+
+The tables above provide a representative snapshot of measured results. Complete raw data remains available in the original measurement environment.
+
+## Reproducibility
+
+The exact upstream Network source commits are recorded in [docs/upstream-versions.tsv](docs/upstream-versions.tsv).
+
+The fetch script checks out these pinned revisions rather than silently using the latest upstream HEAD.
+
+For valid comparisons:
+
+1. Use the same workload configuration for both engines.
+2. Repeat measurements rather than relying on a single run.
+3. Alternate execution order to reduce ordering bias.
+4. Record software versions and hardware characteristics.
+5. Preserve raw logs for inspection.
+
+The `scripts/analyze_network.py` script generates the main Network chart only from complete, matched experiments containing at least 10 unique runs per engine.
 
 ## Threats to validity
 
-- Page Cache, background I/O, CPU scaling, thermals, write amplification, filesystem, file layout, kernel and fio versions, virtualized vs native devices, and disk health.
-- `fio` bandwidth from elapsed read measurements: not independently verified disk bus throughput.
-- An echo client can saturate CPU or memory; both servers should use identical machine/load/configuration and runs should alternate order.
-- When running on different computers, differences cannot be attributed solely to SATA vs NVMe.
+Benchmark results may be affected by:
 
-## Attribution
+- CPU architecture and frequency scaling.
+- Linux kernel and library versions.
+- Filesystem and page-cache behavior.
+- SSD health, storage interface and device characteristics.
+- Background system load and thermal conditions.
+- Client and server implementation differences.
+- Thread scheduling and context-switch overhead.
+- Benchmark duration and measurement methodology.
 
-Upstream repos and license terms are described in [`docs/upstream.md`](docs/upstream.md). This repo's scripts and job files are independent glue code; upstream source is fetched into ignored vendor directories. No upstream licensing notices are removed.
+Disk latency figures report fio completion latency rather than full end-to-end request latency.
 
-Analysis reports medians and min/max spread. Network RPS counts completed responses. Disk latency charts report completion latency (`clat`), not total submission-plus-completion latency.
+Network measurements use TCP loopback, with the client and server sharing host resources.
 
-The project currently has no license for its original glue code; public visibility alone does not grant permission to reuse it. Choose a license before distributing it as open source.
+These results should not be generalized to arbitrary applications or hardware configurations.
+
+## References and attribution
+
+- [Linux io_uring documentation](https://man7.org/linux/man-pages/man7/io_uring.7.html)
+- [fio](https://github.com/axboe/fio)
+- [liburing](https://github.com/axboe/liburing)
+- [epoll echo server](https://github.com/frevib/epoll-echo-server)
+- [io_uring echo server](https://github.com/frevib/io_uring-echo-server)
+- [Rust echo benchmark](https://github.com/haraldh/rust_echo_bench)
+
+Third-party licensing and exact source revisions are documented in [docs/upstream.md](docs/upstream.md).
+
+The project currently has no license for its original glue code. Public availability does not automatically grant permission for reuse.

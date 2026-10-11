@@ -1,23 +1,106 @@
 #!/usr/bin/env bash
-# Download upstream sources as isolated copies; do not silently overwrite local modifications.
+# Fetch upstream repositories at the exact commits recorded in the manifest.
+# Never overwrite local source modifications or change pinned versions silently.
 set -euo pipefail
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-clone_one() {
-  local url="$1" dest="$2"
-  if [[ -d "$dest/.git" ]]; then
-    echo "PRESENT: $dest (no auto-pull)"
-  elif [[ -e "$dest" ]] && [[ -n "$(ls -A "$dest" 2>/dev/null)" ]]; then
-    echo "ERROR: $dest exists and is not a git checkout" >&2; exit 1
-  else
-    git clone --depth 1 "$url" "$dest"
-  fi
+MANIFEST="$ROOT/docs/upstream-versions.tsv"
+
+[[ -f "$MANIFEST" ]] || {
+    echo "ERROR: Missing $MANIFEST" >&2
+    exit 1
 }
-clone_one https://github.com/frevib/epoll-echo-server.git "$ROOT/network/traditional/vendor"
-clone_one https://github.com/frevib/io_uring-echo-server.git "$ROOT/network/io_uring/vendor"
-clone_one https://github.com/haraldh/rust_echo_bench.git "$ROOT/network/client/vendor"
-{
- for d in "$ROOT/network/traditional/vendor" "$ROOT/network/io_uring/vendor" "$ROOT/network/client/vendor"; do
-   printf '%s\t%s\t%s\n' "${d#$ROOT/}" "$(git -C "$d" remote get-url origin)" "$(git -C "$d" rev-parse HEAD)"
- done
-} > "$ROOT/docs/upstream-versions.tsv"
-echo "Fetched. Exact versions recorded in docs/upstream-versions.tsv"
+
+clone_one() {
+    local rel="$1"
+    local url="$2"
+    local sha="$3"
+    local dest="$ROOT/$rel"
+    local expected_url
+
+    case "$rel" in
+        network/traditional/vendor)
+            expected_url="https://github.com/frevib/epoll-echo-server.git"
+            ;;
+        network/io_uring/vendor)
+            expected_url="https://github.com/frevib/io_uring-echo-server.git"
+            ;;
+        network/client/vendor)
+            expected_url="https://github.com/haraldh/rust_echo_bench.git"
+            ;;
+        *)
+            echo "ERROR: Unknown vendor path: $rel" >&2
+            exit 1
+            ;;
+    esac
+
+    [[ "$url" == "$expected_url" ]] || {
+        echo "ERROR: Unexpected upstream URL for $rel" >&2
+        exit 1
+    }
+
+    [[ "$sha" =~ ^[0-9a-fA-F]{40}$ ]] || {
+        echo "ERROR: Invalid commit SHA for $rel" >&2
+        exit 1
+    }
+
+    if [[ -d "$dest/.git" ]]; then
+        echo "EXISTS: $rel"
+
+        [[ "$(git -C "$dest" remote get-url origin)" == "$url" ]] || {
+            echo "ERROR: Origin URL mismatch: $rel" >&2
+            exit 1
+        }
+
+        if ! git -C "$dest" diff --quiet ||
+           ! git -C "$dest" diff --cached --quiet; then
+            echo "ERROR: Local source modifications detected: $rel" >&2
+            exit 1
+        fi
+
+    elif [[ -e "$dest" ]] && [[ -n "$(ls -A "$dest" 2>/dev/null)" ]]; then
+        echo "ERROR: Non-empty directory is not a Git checkout: $dest" >&2
+        exit 1
+    else
+        echo "CLONE: $url"
+        git clone --no-checkout "$url" "$dest"
+    fi
+
+    # A recorded commit may not be present in an existing shallow clone.
+    if ! git -C "$dest" cat-file -e "${sha}^{commit}" 2>/dev/null; then
+        git -C "$dest" fetch --no-tags origin "$sha"
+    fi
+
+    if [[ "$(git -C "$dest" rev-parse HEAD)" != "$sha" ]] ||
+       [[ -z "$(git -C "$dest" ls-files)" ]]; then
+        git -C "$dest" checkout --detach "$sha"
+    fi
+
+    # Check whether the expected files are actually checked out.
+    [[ -n "$(git -C "$dest" ls-files)" ]] || {
+        echo "ERROR: Empty source checkout: $rel" >&2
+        exit 1
+    }
+
+    [[ "$(git -C "$dest" rev-parse HEAD)" == "$sha" ]] || {
+        echo "ERROR: Commit mismatch: $rel" >&2
+        exit 1
+    }
+
+    echo "PINNED: $rel @ $sha"
+}
+
+count=0
+
+while IFS=$'\t' read -r rel url sha; do
+    [[ -z "$rel" ]] && continue
+    clone_one "$rel" "$url" "$sha"
+    ((count += 1))
+done < "$MANIFEST"
+
+[[ "$count" -eq 3 ]] || {
+    echo "ERROR: Expected 3 upstream entries, found $count" >&2
+    exit 1
+}
+
+echo "All upstream repositories verified."
