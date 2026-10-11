@@ -1,0 +1,44 @@
+# Local Python environment and caches
+/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Generated benchmark inputs, raw results and analysis outputs
+/data/
+/results/
+/charts/
+
+# Fetched upstream checkouts (including nested .git and built binaries)
+/network/io_uring/vendor/
+/network/traditional/vendor/
+/network/client/vendor/
+
+# Build products (do not ignore source/config file extensions)
+/build/
+/dist/
+*.o
+*.a
+*.so
+*.so.*
+
+# Temporary files and logs
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+*.log
+*.log.*
+
+# Editor / system
+.vscode/
+.idea/
+.DS_Store
+
+# Local credentials
+.env
+.env.*
+!.env.example

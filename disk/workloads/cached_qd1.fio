@@ -1,0 +1,15 @@
+[global]
+# Cache-friendly, single outstanding read. Use psync vs io_uring QD=1.
+rw=read
+bs=4k
+size=256m
+numjobs=1
+iodepth=1
+direct=0
+invalidate=0
+group_reporting=1
+thread=1
+time_based=1
+# Runtime and ramp are supplied by disk/scripts/run_disk.sh.
+
+[read_cache]
