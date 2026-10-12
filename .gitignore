@@ -9,7 +9,7 @@ __pycache__/
 # Generated benchmark inputs, raw results and analysis outputs
 /data/
 /results/
-/charts/
+
 
 # Fetched upstream checkouts (including nested .git and built binaries)
 /network/io_uring/vendor/
